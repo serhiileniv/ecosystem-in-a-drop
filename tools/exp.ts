@@ -16,6 +16,7 @@ const line = (tag: string) =>
 run(600);
 line('baseline');
 if (mode === 'cull') { w.cull(KIND.PRED, 0.9); line('cull 90% pred'); }
+if (mode === 'cull70') { w.cull(KIND.PRED, 0.7); line('cull 70% pred'); }
 if (mode === 'rad') { CFG.env.radiation = 8; line('radiation x8'); }
 if (mode === 'drought') { CFG.env.drought = 0.35; line('drought 0.35'); }
 if (mode === 'heat') { CFG.env.metabolism = 2.0; line('temp 2.0'); }

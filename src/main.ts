@@ -17,7 +17,7 @@ const WINDOW = 1200; // samples shown in the charts (= 10 simulated minutes)
 const SERIES = [
   't', 'plants', 'herb', 'pred', 'soil', 'biomass', 'hEnergy', 'pEnergy',
   'hGen', 'pGen', 'grazed', 'eaten', 'bornH', 'bornP', 'deadH', 'deadP',
-  'group', 'clans', 'defended', 'cannibal', 'contest',
+  'group', 'clans', 'defended', 'cannibal', 'contest', 'sexH', 'sexP',
   ...Array.from({ length: NT }, (_, k) => 'hT' + k),
   ...Array.from({ length: NT }, (_, k) => 'pT' + k),
 ];
@@ -46,7 +46,7 @@ let disarmUntil = -1;
 
 const prev = {
   grazed: 0, eaten: 0, bornH: 0, bornP: 0, deadH: 0, deadP: 0,
-  defended: 0, cannibal: 0, contest: 0,
+  defended: 0, cannibal: 0, contest: 0, sexH: 0, sexP: 0,
 };
 
 // ---------------------------------------------------------------- sampling
@@ -79,6 +79,8 @@ function takeSample(): void {
     defended: (c.defended - prev.defended) / dt,
     cannibal: (c.cannibal - prev.cannibal) / dt,
     contest: (c.contest - prev.contest) / dt,
+    sexH: (c.sexH - prev.sexH) / dt,
+    sexP: (c.sexP - prev.sexP) / dt,
   };
   for (let k = 0; k < NT; k++) {
     row['hT' + k] = s.hTraits[k];
@@ -94,6 +96,8 @@ function takeSample(): void {
   prev.defended = c.defended;
   prev.cannibal = c.cannibal;
   prev.contest = c.contest;
+  prev.sexH = c.sexH;
+  prev.sexP = c.sexP;
 }
 
 // ------------------------------------------------------------------- panel
@@ -118,6 +122,7 @@ function paintState(): void {
     ['grazing /s', hist.len ? hist.last('grazed').toFixed(1) : '0'],
     ['kills /s', hist.len ? hist.last('eaten').toFixed(2) : '0'],
     ['births /s', hist.len ? (hist.last('bornH') + hist.last('bornP')).toFixed(2) : '0'],
+    ['· sexual %', hist.len ? matingPct() : '–'],
     ['deaths /s', hist.len ? (hist.last('deadH') + hist.last('deadP')).toFixed(2) : '0'],
     ['mobbed /s', hist.len ? hist.last('defended').toFixed(2) : '0'],
     ['cannibal /s', hist.len ? hist.last('cannibal').toFixed(2) : '0'],
@@ -139,6 +144,14 @@ function paintState(): void {
   $('barPlant').style.width = `${(biomass / total) * 100}%`;
   $('barHerb').style.width = `${(he / total) * 100}%`;
   $('barPred').style.width = `${(pe / total) * 100}%`;
+}
+
+/** % of this interval's births that came from two parents rather than the
+ *  solo (isolation) fallback - the visible half of the "cost of sex" trade. */
+function matingPct(): string {
+  const born = hist.last('bornH') + hist.last('bornP');
+  const sex = hist.last('sexH') + hist.last('sexP');
+  return born > 0 ? `${Math.round((100 * sex) / born)}%` : '–';
 }
 
 function traitLegend(): void {
@@ -185,6 +198,7 @@ function paintInspector(): void {
       return `<span>${d.label}</span>${bar(f, init)}<span>${txt}</span>`;
     })
     .join('');
+  const isolation = p.cfg.isolationTime;
 
   box.className = '';
   box.innerHTML =
@@ -198,6 +212,9 @@ function paintInspector(): void {
     `<span>moving</span>${bar(spd / p.T[tb + TR.SPEED])}<span>${spd.toFixed(0)}</span>` +
     `<span>ingested</span>${bar(Math.min(1, p.fed[i] / 600))}<span>${Math.round(p.fed[i])}</span>` +
     `<span>young</span>${bar(Math.min(1, p.kids[i] / 8))}<span>${p.kids[i]}</span>` +
+    `<span>receptive</span>${bar(p.receptive[i])}<span>${p.receptive[i] ? 'yes' : 'no'}</span>` +
+    `<span>courting</span>${bar(p.display[i])}<span>${p.display[i].toFixed(2)}</span>` +
+    `<span>seeking</span>${bar(isolation ? p.lonely[i] / isolation : 0)}<span>${p.lonely[i].toFixed(0)}s</span>` +
     `</div>`;
 
   drawNet(chNet, p.W, i * NW, world.lastInp, world.lastHid, world.lastOut, selKind);

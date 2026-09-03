@@ -11,8 +11,9 @@ export const TR = {
   FOV: 3,
   DIGEST: 4,
   REPRO: 5,
+  ORNAMENT: 6,
 } as const;
-export const NT = 6;
+export const NT = 7;
 
 export interface TraitDef {
   label: string;
@@ -75,6 +76,13 @@ export interface SpeciesCfg {
   eatReach: number;
   /** seconds before a newborn (or a fresh parent) can divide again */
   cooldown: number;
+  /** search radius for a receptive mate = mateReach * size */
+  mateReach: number;
+  /** energy/s burned while courting, per unit of (ornament * court output) */
+  courtCost: number;
+  /** seconds a receptive individual can go without finding a mate before it
+   *  is allowed to fall back to solo (asexual) reproduction instead */
+  isolationTime: number;
 }
 
 const traitCommon = { step: 0.05 };
@@ -116,6 +124,7 @@ export const CFG = {
       { label: 'fov', unit: 'rad', min: 0.7, max: 5.0, init: 2.4, ...traitCommon },
       { label: 'digest', unit: '', min: 0.35, max: 0.95, init: 0.65, ...traitCommon },
       { label: 'repro', unit: '', min: 0.45, max: 0.95, init: 0.62, ...traitCommon },
+      { label: 'ornament', unit: '', min: 0.1, max: 1.0, init: 0.4, ...traitCommon },
     ],
     maxEnergyPerSize: 100,
     startEnergyFrac: 0.5,
@@ -144,6 +153,9 @@ export const CFG = {
     feedCd: 0.6,
     eatReach: 3.5,
     cooldown: 2,
+    mateReach: 16,
+    courtCost: 0.6,
+    isolationTime: 6,
   } as SpeciesCfg,
 
   pred: {
@@ -154,6 +166,7 @@ export const CFG = {
       { label: 'fov', unit: 'rad', min: 0.7, max: 5.0, init: 2.0, ...traitCommon },
       { label: 'digest', unit: '', min: 0.35, max: 0.95, init: 0.70, ...traitCommon },
       { label: 'repro', unit: '', min: 0.50, max: 0.95, init: 0.70, ...traitCommon },
+      { label: 'ornament', unit: '', min: 0.1, max: 1.0, init: 0.4, ...traitCommon },
     ],
     maxEnergyPerSize: 180,
     startEnergyFrac: 0.5,
@@ -182,6 +195,9 @@ export const CFG = {
     feedCd: 3.0,
     eatReach: 3.5,
     cooldown: 4,
+    mateReach: 16,
+    courtCost: 0.6,
+    isolationTime: 10,
   } as SpeciesCfg,
 
   mut: {

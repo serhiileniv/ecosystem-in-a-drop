@@ -50,7 +50,7 @@ function meanFrac(a: Float32Array, b: Float32Array, n: number): number {
 
 const hT = new Float32Array(NT);
 const pT = new Float32Array(NT);
-const COLS = ['t', 'plant', 'herb', 'pred', 'soil', 'grz', 'eat', 'bH', 'stH', 'agH', 'bP', 'stP', 'agP', 'def', 'can', 'vAct', 'eFrac', 'grp', 'clan', 'hSpd', 'hSize', 'hSns', 'hFov', 'hDig', 'hRep', 'pSpd', 'pSize', 'pSns', 'hGen', 'pGen'];
+const COLS = ['t', 'plant', 'herb', 'pred', 'soil', 'grz', 'eat', 'bH', 'stH', 'agH', 'bP', 'stP', 'agP', 'def', 'can', 'sxH', 'sxP', 'vAct', 'eFrac', 'grp', 'clan', 'hSpd', 'hSize', 'hSns', 'hFov', 'hDig', 'hRep', 'hOrn', 'pSpd', 'pSize', 'pSns', 'pOrn', 'hGen', 'pGen'];
 console.log(COLS.map((s) => s.padStart(6)).join(''));
 let prev = { ...w.counters };
 
@@ -70,12 +70,13 @@ for (let k = 0; k <= ticks; k++) {
     const row = [
       s.t.toFixed(0), s.plants, s.herb, s.pred, s.soil.toFixed(0),
       d('grazed'), d('eaten'), d('bornH'), d('starvedH'), d('agedH'), d('bornP'), d('starvedP'), d('agedP'), d('defended'), d('cannibal'),
+      d('sexH'), d('sexP'),
       mean(w.herb.spd, w.herb.n).toFixed(1),
       meanFrac(w.herb.energy, w.herb.emax, w.herb.n).toFixed(2),
       s.group.toFixed(2),
       s.clans.toFixed(1),
-      hT[0].toFixed(0), hT[1].toFixed(2), hT[2].toFixed(0), hT[3].toFixed(2), hT[4].toFixed(2), hT[5].toFixed(2),
-      pT[0].toFixed(0), pT[1].toFixed(2), pT[2].toFixed(0),
+      hT[0].toFixed(0), hT[1].toFixed(2), hT[2].toFixed(0), hT[3].toFixed(2), hT[4].toFixed(2), hT[5].toFixed(2), hT[6].toFixed(2),
+      pT[0].toFixed(0), pT[1].toFixed(2), pT[2].toFixed(0), pT[6].toFixed(2),
       s.hGen.toFixed(1), s.pGen.toFixed(1),
     ];
     console.log(row.map((v) => String(v).padStart(6)).join(''));
@@ -96,3 +97,7 @@ console.log(`energy: start ${e0.toFixed(1)}  end ${e1.toFixed(1)}  drift ${(e1 -
 console.log(`peaks: herb ${peakH}  pred ${peakP}`);
 console.log(`first extinction: herb ${extinctHerb < 0 ? 'never' : extinctHerb.toFixed(0) + 's'}, pred ${extinctPred < 0 ? 'never' : extinctPred.toFixed(0) + 's'}`);
 console.log(`totals: grazed ${w.counters.grazed}  eaten ${w.counters.eaten}  bornH ${w.counters.bornH}  bornP ${w.counters.bornP}  starvedH ${w.counters.starvedH}  starvedP ${w.counters.starvedP}`);
+console.log(
+  `mating: sexH ${w.counters.sexH}/${w.counters.bornH} (${w.counters.bornH ? ((100 * w.counters.sexH) / w.counters.bornH).toFixed(0) : 0}%)  ` +
+    `sexP ${w.counters.sexP}/${w.counters.bornP} (${w.counters.bornP ? ((100 * w.counters.sexP) / w.counters.bornP).toFixed(0) : 0}%)`,
+);

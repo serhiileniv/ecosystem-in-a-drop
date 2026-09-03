@@ -1,7 +1,7 @@
 import type { History } from '../core/history';
 import { CFG, NT } from '../sim/config';
 
-export const TRAIT_COLORS = ['#6fd0bb', '#e8b45f', '#c98adf', '#7f9ff0', '#e8809f', '#9fdc6a'];
+export const TRAIT_COLORS = ['#6fd0bb', '#e8b45f', '#c98adf', '#7f9ff0', '#e8809f', '#9fdc6a', '#e89858'];
 const AXIS = '#1e262f';
 const LABEL = '#4c5966';
 

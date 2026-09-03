@@ -1,7 +1,7 @@
 import { Rng } from '../core/rng';
 import { Grid } from '../core/grid';
 import { CFG, NT, TR, type SpeciesCfg } from './config';
-import { NIN, NHID, NOUT, NW, SECTORS, forward, randomBrain, inherit } from './brain';
+import { NIN, NHID, NOUT, NW, SECTORS, forward, randomBrain, inherit, inheritSexual } from './brain';
 
 export const KIND = { PLANT: 0, HERB: 1, PRED: 2 } as const;
 
@@ -24,6 +24,14 @@ export interface Pop {
   fed: Float32Array;
   /** heritable lineage marker in [0,1); clan identity for herd defence */
   tag: Float32Array;
+  /** this tick's courtship broadcast strength (0 = not displaying), read by
+   *  other creatures' "mate" vision channel */
+  display: Float32Array;
+  /** 1 if currently willing and able to reproduce, 0 otherwise */
+  receptive: Uint8Array;
+  /** seconds spent receptive without finding a mate; past isolationTime this
+   *  unlocks the solo (asexual) fallback */
+  lonely: Float32Array;
   T: Float32Array; // cap * NT heritable traits
   W: Float32Array; // cap * NW network weights
   uid: Int32Array;
@@ -59,6 +67,9 @@ function makePop(cfg: SpeciesCfg, cap: number): Pop {
     feed: new Float32Array(cap),
     fed: new Float32Array(cap),
     tag: new Float32Array(cap),
+    display: new Float32Array(cap),
+    receptive: new Uint8Array(cap),
+    lonely: new Float32Array(cap),
     T: new Float32Array(cap * NT),
     W: new Float32Array(cap * NW),
     uid: new Int32Array(cap),
@@ -83,6 +94,9 @@ function moveSlot(p: Pop, dst: number, src: number): void {
   p.feed[dst] = p.feed[src];
   p.fed[dst] = p.fed[src];
   p.tag[dst] = p.tag[src];
+  p.display[dst] = p.display[src];
+  p.receptive[dst] = p.receptive[src];
+  p.lonely[dst] = p.lonely[src];
   p.uid[dst] = p.uid[src];
   p.gen[dst] = p.gen[src];
   p.kids[dst] = p.kids[src];
@@ -138,6 +152,10 @@ export interface Counters {
   cannibal: number;
   /** energy burned in dominance contests between comparable rivals */
   contest: number;
+  /** successful two-parent matings (subset of bornH/bornP - the rest are the
+   *  solo fallback, used past isolationTime with no mate in reach) */
+  sexH: number;
+  sexP: number;
 }
 
 export class World {
@@ -153,7 +171,7 @@ export class World {
   gPred: Grid;
   counters: Counters = {
     bornH: 0, bornP: 0, starvedH: 0, starvedP: 0, agedH: 0, agedP: 0,
-    eaten: 0, grazed: 0, defended: 0, cannibal: 0, contest: 0,
+    eaten: 0, grazed: 0, defended: 0, cannibal: 0, contest: 0, sexH: 0, sexP: 0,
   };
   seed: number;
 
@@ -239,9 +257,33 @@ export class World {
     return true;
   }
 
+  /** Fields shared by every new slot, regardless of how its genes were made. */
+  private finalizeNew(p: Pop, i: number, x: number, y: number): void {
+    const c = p.cfg;
+    const size = p.T[i * NT + TR.SIZE];
+    p.x[i] = x;
+    p.y[i] = y;
+    p.ang[i] = this.rng.f() * 6.283185307179586;
+    p.spd[i] = 0;
+    p.emax[i] = c.maxEnergyPerSize * size;
+    p.struct[i] = c.structPerSize * size;
+    p.age[i] = 0;
+    p.maxAge[i] = Math.max(20, c.maxAge * (1 + this.rng.gauss() * c.ageSpread));
+    p.cool[i] = c.cooldown;
+    p.feed[i] = 0;
+    p.fed[i] = 0;
+    p.display[i] = 0;
+    p.receptive[i] = 0;
+    p.lonely[i] = 0;
+    p.kids[i] = 0;
+    p.uid[i] = this.nextUid++;
+    p.dead[i] = 0;
+  }
+
   /**
    * Create a creature. `parent >= 0` inherits (with mutation) from that slot and
    * splits its energy; `parent < 0` creates a random founder funded by the soil.
+   * Used for the initial population and for the solo (asexual) fallback path.
    */
   birth(p: Pop, x: number, y: number, parent: number): number {
     if (p.n >= p.cap) return -1;
@@ -274,21 +316,7 @@ export class World {
       p.gen[i] = p.gen[parent] + 1;
     }
 
-    const size = p.T[tb + TR.SIZE];
-    p.x[i] = x;
-    p.y[i] = y;
-    p.ang[i] = this.rng.f() * 6.283185307179586;
-    p.spd[i] = 0;
-    p.emax[i] = c.maxEnergyPerSize * size;
-    p.struct[i] = c.structPerSize * size;
-    p.age[i] = 0;
-    p.maxAge[i] = Math.max(20, c.maxAge * (1 + this.rng.gauss() * c.ageSpread));
-    p.cool[i] = c.cooldown;
-    p.feed[i] = 0;
-    p.fed[i] = 0;
-    p.kids[i] = 0;
-    p.uid[i] = this.nextUid++;
-    p.dead[i] = 0;
+    this.finalizeNew(p, i, x, y);
 
     if (parent < 0) {
       const want = p.emax[i] * c.startEnergyFrac + p.struct[i];
@@ -299,6 +327,43 @@ export class World {
     } else {
       p.energy[i] = 0; // filled in by the caller from the parent's split
     }
+    return i;
+  }
+
+  /**
+   * Sexual reproduction: every heritable trait is independently inherited from
+   * one parent or the other (Mendelian assortment), and the brain weights go
+   * through uniform crossover - a child can combine a strength from each
+   * parent that neither parent's own single-parent clone ever could. Energy
+   * is filled in by the caller from both parents' contribution.
+   */
+  birthSexual(p: Pop, x: number, y: number, parentA: number, parentB: number): number {
+    if (p.n >= p.cap) return -1;
+    const i = p.n++;
+    const c = p.cfg;
+    const tb = i * NT;
+    const rad = CFG.env.radiation;
+    const ab = parentA * NT;
+    const bb = parentB * NT;
+
+    for (let k = 0; k < NT; k++) {
+      const d = c.traits[k];
+      const base = this.rng.f() < 0.5 ? p.T[ab + k] : p.T[bb + k];
+      const v = base + this.rng.gauss() * d.step * (d.max - d.min) * rad;
+      p.T[tb + k] = clamp(v, d.min, d.max);
+    }
+    inheritSexual(
+      p.W, parentA * NW, parentB * NW, i * NW,
+      CFG.mut.rate * rad, CFG.mut.sigma * rad, this.rnd, this.gauss,
+    );
+    // clan identity passes through one parent at random, same slow drift as asexual
+    let tg = (this.rng.f() < 0.5 ? p.tag[parentA] : p.tag[parentB]) + this.rng.gauss() * c.tagMut * rad;
+    tg -= Math.floor(tg);
+    p.tag[i] = tg;
+    p.gen[i] = Math.max(p.gen[parentA], p.gen[parentB]) + 1;
+
+    this.finalizeNew(p, i, x, y);
+    p.energy[i] = 0; // filled in by the caller from both parents' split
     return i;
   }
 
@@ -517,34 +582,88 @@ export class World {
         continue;
       }
 
-      // ---- division
+      // ---- reproduction
       // Offspring are provisioned with a fixed share of their own capacity, so a
-      // newborn is always viable; only the parent takes the risk of dividing early.
-      const minPay = (c.childFrac * p.emax[i] + c.structPerSize * size) * (1 + c.reproWaste);
-      if (
-        out[2] > 0 &&
-        p.cool[i] <= 0 &&
-        p.energy[i] >= reproT * p.emax[i] &&
-        p.energy[i] > minPay &&
-        p.n < p.cap
-      ) {
-        const jitter = this.rng.range(0, 6.283185307179586);
-        const ch = this.birth(
-          p,
-          nx + Math.cos(jitter) * size * 3,
-          ny + Math.sin(jitter) * size * 3,
-          i,
-        );
-        if (ch >= 0) {
-          const pay = (c.childFrac * p.emax[ch] + p.struct[ch]) * (1 + c.reproWaste);
-          const give = pay / (1 + c.reproWaste) - p.struct[ch];
-          p.energy[i] -= pay;
-          p.energy[ch] = give;
-          this.soil += pay - give - p.struct[ch];
-          p.cool[i] = c.cooldown;
-          p.kids[i]++;
-          if (isHerb) this.counters.bornH++;
-          else this.counters.bornP++;
+      // newborn is always viable; only the parent(s) take the risk of reproducing
+      // early. minPay is what ONE parent needs to spare for a sexual pairing
+      // (half the total cost of a child); the solo fallback below pays it twice.
+      const ornament = p.T[tb + TR.ORNAMENT];
+      const minPay = (c.childFrac * p.emax[i] + c.structPerSize * size) * (1 + c.reproWaste) * 0.5;
+      const readyNow =
+        out[2] > 0 && p.cool[i] <= 0 && p.energy[i] >= reproT * p.emax[i] && p.energy[i] > minPay;
+
+      // courtship: advertise the ornament trait at a metabolic cost, visible to
+      // others' "mate" channel from next tick onward. Only a receptive creature
+      // is worth displaying for, so silence otherwise - the channel means
+      // "available and attractive", not just "showing off".
+      const disp = readyNow && out[3] > 0 ? clamp01(out[3]) : 0;
+      if (disp > 0) {
+        const courtPay = Math.min(c.courtCost * ornament * disp * dt, p.energy[i]);
+        p.energy[i] -= courtPay;
+        this.soil += courtPay;
+      }
+      p.display[i] = disp;
+      p.receptive[i] = readyNow ? 1 : 0;
+
+      if (readyNow && p.n < p.cap) {
+        const reach = c.mateReach * size;
+        const mateGrid = isHerb ? this.gHerb : this.gPred;
+        const mateIdx = nearest(mateGrid, p.x, p.y, p.dead, nx, ny, reach, i, null, 0, p.receptive);
+
+        if (mateIdx >= 0 && p.energy[mateIdx] > minPay) {
+          const jitter = this.rng.range(0, 6.283185307179586);
+          const ch = this.birthSexual(
+            p,
+            (nx + p.x[mateIdx]) / 2 + Math.cos(jitter) * size,
+            (ny + p.y[mateIdx]) / 2 + Math.sin(jitter) * size,
+            i,
+            mateIdx,
+          );
+          if (ch >= 0) {
+            const pay = (c.childFrac * p.emax[ch] + p.struct[ch]) * (1 + c.reproWaste);
+            const give = pay / (1 + c.reproWaste) - p.struct[ch];
+            const eachPay = pay / 2;
+            p.energy[i] -= eachPay;
+            p.energy[mateIdx] -= eachPay;
+            p.energy[ch] = give;
+            this.soil += pay - give - p.struct[ch];
+            p.cool[i] = c.cooldown;
+            p.cool[mateIdx] = c.cooldown;
+            p.receptive[i] = 0;
+            p.receptive[mateIdx] = 0;
+            p.lonely[i] = 0;
+            p.lonely[mateIdx] = 0;
+            p.kids[i]++;
+            p.kids[mateIdx]++;
+            if (isHerb) { this.counters.bornH++; this.counters.sexH++; }
+            else { this.counters.bornP++; this.counters.sexP++; }
+          }
+        } else if (p.lonely[i] < c.isolationTime) {
+          // no mate in reach yet - the clock only runs while genuinely searching
+          // (readyNow), so a not-yet-mature or temporarily-too-poor individual
+          // doesn't burn through its isolation budget before it ever gets a turn;
+          // progress is kept (not reset) across a brief dip below the energy
+          // threshold, so a marginal individual doesn't have to hold "receptive"
+          // for one unbroken isolationTime stretch to ever qualify.
+          p.lonely[i] += dt;
+        } else if (p.energy[i] > minPay * 2) {
+          // isolation clock ran out with no mate found - self-fertilise rather
+          // than simply waste the standing energy
+          const jitter = this.rng.range(0, 6.283185307179586);
+          const ch = this.birth(p, nx + Math.cos(jitter) * size * 3, ny + Math.sin(jitter) * size * 3, i);
+          if (ch >= 0) {
+            const pay = (c.childFrac * p.emax[ch] + p.struct[ch]) * (1 + c.reproWaste);
+            const give = pay / (1 + c.reproWaste) - p.struct[ch];
+            p.energy[i] -= pay;
+            p.energy[ch] = give;
+            this.soil += pay - give - p.struct[ch];
+            p.cool[i] = c.cooldown;
+            p.lonely[i] = 0;
+            p.receptive[i] = 0;
+            p.kids[i]++;
+            if (isHerb) this.counters.bornH++;
+            else this.counters.bornP++;
+          }
         }
       }
     }
@@ -562,9 +681,12 @@ export class World {
   }
 
   /**
-   * Fill `inp` with the creature's 18 sensory values. Channels are relative to
+   * Fill `inp` with the creature's 23 sensory values. Channels are relative to
    * the species: herbivores see plants / herbivores / predators, predators see
-   * herbivores / predators / plants.
+   * herbivores / predators / plants. The 4th channel ("mate") re-scans the
+   * same-species grid, but weighted by each neighbour's last committed
+   * courtship display rather than by bare presence - a creature that isn't
+   * both receptive and displaying is invisible on it.
    */
   senseInto(p: Pop, i: number, isHerb: boolean, inp: Float32Array): void {
     const tb = i * NT;
@@ -588,9 +710,10 @@ export class World {
     scan(foodGrid, foodX, foodY, foodDead, x, y, ca, sa, sense, fov, inp, 0, -1);
     const kin = scan(kinGrid, p.x, p.y, p.dead, x, y, ca, sa, sense, fov, inp, SECTORS, i);
     scan(otherGrid, otherX, otherY, otherDead, x, y, ca, sa, sense, fov, inp, 2 * SECTORS, -1);
-    inp[15] = p.energy[i] / p.emax[i];
-    inp[16] = Math.min(1, kin / 10);
-    inp[17] = 1;
+    scanWeighted(kinGrid, p.x, p.y, p.dead, p.display, x, y, ca, sa, sense, fov, inp, 3 * SECTORS, i);
+    inp[4 * SECTORS] = p.energy[i] / p.emax[i];
+    inp[4 * SECTORS + 1] = Math.min(1, kin / 10);
+    inp[4 * SECTORS + 2] = 1;
   }
 
   /** Recompute (without side effects) the network I/O of one creature, for the inspector. */
@@ -754,6 +877,10 @@ function clamp(v: number, a: number, b: number): number {
   return v < a ? a : v > b ? b : v;
 }
 
+function clamp01(v: number): number {
+  return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
 function compactPlants(P: Plants): void {
   let n = P.n;
   let i = 0;
@@ -839,6 +966,7 @@ function nearest(
   self: number,
   sizeOf: Float32Array | null = null,
   maxSize = 0,
+  mask: Uint8Array | null = null,
 ): number {
   const r2 = r * r;
   let best = -1;
@@ -857,6 +985,7 @@ function nearest(
         const j = g.order[k];
         if (j === self || dead[j]) continue;
         if (sizeOf !== null && sizeOf[j * NT + TR.SIZE] > maxSize) continue;
+        if (mask !== null && mask[j] !== 1) continue;
         const dx = xs[j] - px;
         const dy = ys[j] - py;
         const d2 = dx * dx + dy * dy;
@@ -868,6 +997,63 @@ function nearest(
     }
   }
   return best;
+}
+
+/**
+ * Same directional per-sector scan as `scan()`, but each object's contribution
+ * is multiplied by `weight[j]` instead of being flat presence - an object with
+ * weight 0 (not displaying) is invisible on this channel.
+ */
+function scanWeighted(
+  g: Grid,
+  xs: Float32Array,
+  ys: Float32Array,
+  dead: Uint8Array,
+  weight: Float32Array,
+  px: number,
+  py: number,
+  ca: number,
+  sa: number,
+  range: number,
+  fov: number,
+  inp: Float32Array,
+  chOff: number,
+  self: number,
+): void {
+  const half = fov * 0.5;
+  const r2 = range * range;
+  const c0 = g.cx(px - range);
+  const c1 = g.cx(px + range);
+  const r0 = g.cy(py - range);
+  const r1 = g.cy(py + range);
+  for (let ry = r0; ry <= r1; ry++) {
+    const row = ry * g.cols;
+    for (let cx = c0; cx <= c1; cx++) {
+      const cell = row + cx;
+      const s = g.start[cell];
+      const e = s + g.count[cell];
+      for (let k = s; k < e; k++) {
+        const j = g.order[k];
+        if (j === self || dead[j]) continue;
+        const w = weight[j];
+        if (w <= 0) continue;
+        const dx = xs[j] - px;
+        const dy = ys[j] - py;
+        const d2 = dx * dx + dy * dy;
+        if (d2 > r2) continue;
+        const lx = dx * ca + dy * sa;
+        const ly = -dx * sa + dy * ca;
+        const a = Math.atan2(ly, lx);
+        if (a < -half || a > half) continue;
+        let sec = (((a + half) / fov) * SECTORS) | 0;
+        if (sec < 0) sec = 0;
+        else if (sec >= SECTORS) sec = SECTORS - 1;
+        const v = (1 - Math.sqrt(d2) / range) * w;
+        const idx = chOff + sec;
+        if (v > inp[idx]) inp[idx] = v;
+      }
+    }
+  }
 }
 
 /** How many clan-mates of `tag` stand within r of (px,py). */

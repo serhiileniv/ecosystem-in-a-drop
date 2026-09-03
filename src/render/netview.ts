@@ -3,8 +3,9 @@ import { NIN, NHID, NOUT, NW, W1, W2, SECTORS } from '../sim/brain';
 import { KIND } from '../sim/world';
 import { CLR } from './view';
 
-const OUT_LABELS = ['thrust', 'turn', 'split'];
-const GROUP_LABELS = ['food', 'kin', 'risk'];
+const OUT_LABELS = ['thrust', 'turn', 'ready', 'court'];
+const GROUP_LABELS = ['food', 'kin', 'risk', 'mate'];
+const MATE_COLOR = '232,144,178';
 
 function actColor(v: number): string {
   // negative = cool, positive = warm, magnitude = opacity
@@ -15,7 +16,7 @@ function actColor(v: number): string {
 }
 
 /**
- * The selected creature's network: 18 sensory inputs, 8 hidden units, 3 motor
+ * The selected creature's network: 23 sensory inputs, 8 hidden units, 4 motor
  * outputs. Edge opacity is |weight|, edge colour its sign; node fill is the
  * live activation of the last tick.
  */
@@ -77,10 +78,10 @@ export function drawNet(
   // ---- input nodes, coloured by the channel they report
   const chan =
     kind === KIND.PRED
-      ? [CLR.herb, CLR.pred, CLR.plant]
-      : [CLR.plant, CLR.herb, CLR.pred];
+      ? [CLR.herb, CLR.pred, CLR.plant, MATE_COLOR]
+      : [CLR.plant, CLR.herb, CLR.pred, MATE_COLOR];
   for (let i = 0; i < NIN; i++) {
-    const ch = i < 3 * SECTORS ? (i / SECTORS) | 0 : -1;
+    const ch = i < 4 * SECTORS ? (i / SECTORS) | 0 : -1;
     const v = Math.min(1, inp[i]);
     ctx.beginPath();
     ctx.arc(xi, yi(i), 2.6, 0, 6.283185307179586);
@@ -89,10 +90,10 @@ export function drawNet(
   }
   ctx.fillStyle = '#4c5966';
   ctx.textAlign = 'right';
-  for (let g = 0; g < 3; g++) ctx.fillText(GROUP_LABELS[g], xi - 7, yi(g * SECTORS + 2));
-  ctx.fillText('E', xi - 7, yi(15));
-  ctx.fillText('n', xi - 7, yi(16));
-  ctx.fillText('1', xi - 7, yi(17));
+  for (let g = 0; g < 4; g++) ctx.fillText(GROUP_LABELS[g], xi - 7, yi(g * SECTORS + 2));
+  ctx.fillText('E', xi - 7, yi(4 * SECTORS));
+  ctx.fillText('n', xi - 7, yi(4 * SECTORS + 1));
+  ctx.fillText('1', xi - 7, yi(4 * SECTORS + 2));
 
   // ---- hidden + output nodes
   for (let h = 0; h < NHID; h++) {

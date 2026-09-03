@@ -1,8 +1,10 @@
 # Ecosystem in a Drop
 
 A closed petri dish with three trophic levels — vegetation, herbivores, predators.
-Nobody is trained and nothing is scripted: every animal carries its own 18→8→3
-neural network, and the only optimiser is *dying without offspring*.
+Nobody is trained and nothing is scripted: every animal carries its own 23→8→4
+neural network, and the only optimiser is *dying, or living, without offspring* —
+reproduction is sexual, with mate choice, genetic recombination, and a fallback for
+when nobody's around.
 
 Zero runtime dependencies. Vanilla TypeScript, one Canvas2D surface, all state in
 typed arrays (struct-of-arrays), single threaded, deterministic from a seed.
@@ -42,47 +44,101 @@ decorative: a herbivore boom is *literally* the soil pool moving into cyan trian
 | Dominance contests | Rivals too close in size to eat each other still burn energy on interference when they meet (`contestCost` per rival per second within 35 px). This is a density-dependent brake on the predator population that costs no prey. |
 | Herd defence | An attack on a herbivore is broken off with probability `d/(1+d)`, where `d = defK · (clan-mates within 34 px) / attacker size`. The attacker pays for the failed rush. Nothing here makes herbivores group — it only makes grouping *pay*, and leaves the behaviour to evolution. |
 | Clan markers | Every herbivore carries a heritable marker in [0,1) that drifts a little each generation and is under no selection of its own. Only creatures whose markers differ by less than 0.06 count as each other's defenders, so "who is my tribe" is inherited rather than assigned. Herbivores are tinted by marker in the dish (`c` toggles it). |
-| Reproduction | Offspring get a fixed provision of their own capacity plus their structural biomass, paid by the parent. Newborns are therefore always viable and only the parent gambles — this removes the "divide at any cost" suicide spiral that kills naive predator–prey sims. |
+| Reproduction | **Sexual**, with mate choice and genetic recombination — see below. Offspring always get a fixed provision of their own capacity plus their structural biomass, funded by whoever is paying for them, so a newborn is always viable and only the parent(s) gamble. |
 | Death | Starvation or old age. Body and reserves go back to the soil. |
 | Metabolism | `base·(0.4+0.6·size²) + move·(v/v₀)²·size + sense·range + digest·efficiency`. Every trait has a running cost, so nothing is free to maximise. |
 
 ### The brain
 
-Each animal has a fixed-topology MLP with 179 weights, stored inline in the
+Each animal has a fixed-topology MLP with 228 weights, stored inline in the
 population's flat `Float32Array`.
 
 ```
-18 inputs → 8 hidden (tanh) → 3 outputs (tanh)
+23 inputs → 8 hidden (tanh) → 4 outputs (tanh)
 ```
 
 Vision is a cone of `fov` radians split into **5 sectors**, and each sector reports
-the nearest object on **3 channels** (15 values). The channels are relative to the
+the nearest object on **4 channels** (20 values). The channels are relative to the
 species:
 
-| | channel 0 "food" | channel 1 "kin" | channel 2 "risk" |
-| --- | --- | --- | --- |
-| herbivore | plants | herbivores | predators |
-| predator | herbivores | predators | plants |
+| | channel 0 "food" | channel 1 "kin" | channel 2 "risk" | channel 3 "mate" |
+| --- | --- | --- | --- | --- |
+| herbivore | plants | herbivores | predators | herbivores, weighted by courtship |
+| predator | herbivores | predators | plants | predators, weighted by courtship |
 
-Plus normalised energy, local crowding of its own species, and a bias. Note that
-the "kin" channel is what an animal would need in order to seek out its own herd —
-whether it learns to use that way is an open question in this model, see below.
-Outputs are thrust, turn and *divide now*. Select any creature to see its live cone in the dish
-and its live activations in the panel.
+The "mate" channel re-scans the same population as "kin", but an individual is only
+visible on it if it is currently *both* receptive and actively courting — bare
+presence doesn't show up, the way it does on "kin". Plus normalised energy, local
+crowding of its own species, and a bias. Outputs are thrust, turn, *ready to
+reproduce*, and *court* (see below). Select any creature to see its live cone in the
+dish and its live activations in the panel.
 
 ### Heritable traits
 
 `speed · size · sense range · field of view · digestive efficiency · reproduction
-threshold`, each mutated by a gaussian step at birth, each clamped to a range, each
-paid for through metabolism. The trait chart plots the population mean of all six,
-normalised to their own limits.
+threshold · ornament`, each mutated by a gaussian step at birth, each clamped to a
+range, each paid for through metabolism (the ornament through the courtship cost
+below). The trait chart plots the population mean of all seven, normalised to their
+own limits.
+
+## Sexual reproduction
+
+Reproduction is sexual for both species, with mate choice expressed entirely through
+the brain rather than a hard-coded rule, real genetic recombination between two
+parents, and a self-fertilisation fallback so an isolated individual is never a
+guaranteed dead end.
+
+**Courtship.** A creature that is energetically ready to reproduce (`ready` output
+> 0, off cooldown, above its `repro` trait threshold) can also `court`: broadcasting
+its heritable `ornament` trait at a cost proportional to `ornament × court output`,
+paid every tick it does so. This is a classic costly ("handicap principle") signal —
+an animal with a large ornament and a brain willing to spend energy advertising it
+is demonstrably able to afford the cost, which is the only reason the signal can't
+just be faked for free. The signal is what shows up on other creatures' "mate"
+channel; a receptive-but-silent animal (`court` ≤ 0) is invisible to searching
+partners, and an animal that isn't receptive at all shows nothing regardless of
+`court`.
+
+**Choice.** There is no hard-coded preference trait. Whatever attraction exists is
+whatever the network has evolved to do with the "mate" input — steer toward it,
+ignore it, or (in principle) steer away from it. This is deliberately the harder,
+more open-ended version of Fisherian sexual selection: the model gives evolution the
+sensory and behavioural primitives for mate choice and lets it decide whether choice
+is worth having.
+
+**Mating.** When a receptive creature finds another receptive, same-species
+individual within `mateReach`, they pair: the child's genome is built by
+*independent assortment* (each of the 7 heritable traits comes from a coin flip
+between the two parents, then mutates by the normal per-trait step) and *uniform
+crossover* of the two parents' 228 brain weights (each weight independently
+inherited from one parent or the other, then mutated by the normal per-weight rate).
+A child can therefore combine a strength from each parent that neither parent's own
+solo clone ever could — this is the actual genetic novelty sexual reproduction adds
+on top of point mutation. Both parents pay half the child's provisioning cost.
+
+**The fallback.** If no mate turns up, the search keeps failing every tick, and a
+per-individual clock — ticking only while the animal is actually receptive and
+searching — keeps running. Past `isolationTime` (6 s herbivores, 10 s predators) the
+animal self-fertilises instead: the ordinary single-parent clone-and-mutate path,
+funded entirely by itself. This exists specifically so a genuinely isolated survivor
+(the aftermath of a cull, say) is never locked out of reproducing just because
+nobody else is around — see the Allee-effect bug below for why getting this right
+mattered more than it looked like it would.
+
+**The trade.** This is the closest the model comes to reproducing the textbook
+"two-fold cost of sex": sexual offspring cost each parent only half of what a solo
+clone costs, but *only* if a partner can be found in time, and courtship itself is a
+running tax on top. Measured at the shipped settings, the population is a real mixed
+economy rather than one strategy dominating — see below.
 
 ---
 
 ## What to watch for
 
 Numbers below are from seed 4242, measured with `tools/exp.ts` — your seed will
-differ in detail, not in kind.
+differ in detail, not in kind. Bullets predating sexual reproduction (which shifted
+the whole population baseline) are kept because the qualitative finding still holds
+when re-measured, not because the exact figures are current.
 
 - **Lotka–Volterra cycles.** The phase portrait (prey → predator) traces a genuine
   orbit rather than a point. Prey peak, predators follow about a quarter-cycle later.
@@ -138,6 +194,40 @@ differ in detail, not in kind.
   effective variants to 3–4 within a few hundred seconds and stays there — a handful
   of lineages own the dish, and you can see them as distinct tints. That is drift and
   selective sweeps, not tribal warfare; do not read more into it than that.
+- **Sex settles into a real mixed economy, not a landslide.** Across five seeds at
+  1800–3600 s, 44–55 % of herbivore births and 19–41 % of predator births are
+  sexual; the rest are the solo fallback. Predators mate less often than herbivores
+  for a mundane reason — they're rarer, `mateReach` scales with size not sense
+  range, and `isolationTime` is longer (10 s vs 6 s) — not because the model favours
+  one strategy over the other. Neither reproductive mode goes to zero on any seed
+  tested, which is itself the finding: the isolation fallback keeps solo
+  reproduction from disappearing even where mates are usually available.
+- **An Allee-effect bug, caught by testing the model's own claims.** The first
+  version of the isolation clock reset to zero on every tick an individual wasn't
+  "receptive" - so a marginal survivor whose energy dipped below the reproduction
+  threshold even briefly lost all its accumulated search time and had to restart the
+  full `isolationTime` wait from scratch. Cull 90 % of the predators down to 1–2
+  stragglers and it was reproducible: they went extinct in the first 20 s post-cull
+  despite the fallback existing on paper, because they could never hold "receptive"
+  for one unbroken stretch that long. The fix decouples the clock from momentary
+  energy dips (it only pauses, never resets, while not receptive) - after which the
+  same 90 % cull recovers in the same few hundred seconds the pre-sexual model did.
+  Left as-is, this would have been a real, if narrow, avenue to permanent predator
+  extinction from an ordinary cull button click - the kind of failure mode sexual
+  reproduction introduces for free and asexual division structurally cannot have,
+  since a single asexual survivor never needs anyone else's cooperation to
+  reproduce. Worth knowing if you tune `isolationTime` down: the effect only gets
+  easier to trigger, not harder.
+- **Size arms races don't always reverse now.** Under the old asexual model, prey
+  and predator size cycled up during an arms race and then predators recovering with
+  a wave of new small-and-cheap prey; that still happens on most seeds. On at least
+  one tested seed, prey and predator size instead pinned at the trait ceiling
+  (herb 2.2/2.2, pred 2.8+/3.0) and stayed there through 2400 s without a reversal
+  - the population survived (it never dropped below double digits), but the escape
+  valve that used to reliably reset the arms race didn't fire. Whether mate search
+  and courtship cost are what's keeping size pinned, or it's just a longer-tailed
+  version of dynamics the asexual model already had, is an open question - not a
+  claim, a flag for anyone poking at this next.
 - **The energy budget bar** under the state readout is the whole story in one line:
   a healthy dish keeps most of its energy in the soil; a dying one has it stranded in
   biomass that nothing can eat.
@@ -192,9 +282,12 @@ npx vite-node tools/exp.ts -- drought      # perturb a settled dish, print the r
 ```
 
 Prints populations, per-interval event counts (grazing, kills, births, starvation,
-old age), mean traits, mean generation, an energy-conservation check and a
-throughput figure. `--set a.b=c` reaches any field of `src/sim/config.ts`, which is
-where every tunable number in the model lives.
+old age, sexual matings, cannibalism, mobbing), mean traits including ornament, mean
+generation, an energy-conservation check and a throughput figure. The final line
+breaks down each species' births into sexual vs. solo-fallback. `--set a.b=c`
+reaches any field of `src/sim/config.ts`, which is where every tunable number in
+the model lives — `herb.mateReach`, `pred.isolationTime` and `pred.courtCost` are
+the ones worth starting with if you want to push on the mating mechanics.
 
 ## Layout
 
