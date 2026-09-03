@@ -7,6 +7,12 @@ neural network, and the only optimiser is *dying without offspring*.
 Zero runtime dependencies. Vanilla TypeScript, one Canvas2D surface, all state in
 typed arrays (struct-of-arrays), single threaded, deterministic from a seed.
 
+![12 real seconds inside a fast-forwarded run: predators, herbivores and the trait-evolution panel all moving live](docs/demo.gif)
+
+A 12-second clip from partway through a run. The full [~98s recording](docs/demo.mp4)
+starts at generation 0 and walks through a predator cull and a radiation flare before
+this fast-forward segment.
+
 ```bash
 npm install
 npm run dev        # http://localhost:5173
