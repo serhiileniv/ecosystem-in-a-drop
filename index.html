@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ecosystem in a Drop</title>
+  </head>
+  <body>
+    <div id="app">
+      <main id="stage">
+        <canvas id="dish"></canvas>
+
+        <div id="hud">
+          <div class="hud-row">
+            <span class="brand">ECOSYSTEM IN A DROP</span>
+            <span class="sep"></span>
+            <span class="clock" id="clock">00:00</span>
+            <span class="dim" id="fps">– fps</span>
+          </div>
+          <div class="hud-row">
+            <div class="seg" id="speed">
+              <button data-speed="0" title="Pause / resume (Space)">❚❚</button>
+              <button data-speed="1" class="on">1&times;</button>
+              <button data-speed="4">4&times;</button>
+              <button data-speed="16">16&times;</button>
+              <button data-speed="64">64&times;</button>
+            </div>
+            <button id="stepBtn" class="ghost" title="Advance one tick (.)">step</button>
+          </div>
+          <div class="hud-row legend">
+            <span><i class="sw plant"></i>plants <b id="nPlant">0</b></span>
+            <span><i class="sw herb"></i>herbivores <b id="nHerb">0</b></span>
+            <span><i class="sw pred"></i>predators <b id="nPred">0</b></span>
+          </div>
+        </div>
+
+        <div id="tip">click any creature to inspect its brain &middot; c toggles clan colours</div>
+      </main>
+
+      <aside id="panel">
+        <section class="card">
+          <h2>state</h2>
+          <div class="kv" id="stateKv"></div>
+          <div class="bar" title="where the fixed energy budget currently sits">
+            <span id="barSoil" class="b-soil"></span>
+            <span id="barPlant" class="b-plant"></span>
+            <span id="barHerb" class="b-herb"></span>
+            <span id="barPred" class="b-pred"></span>
+          </div>
+          <div class="barlab"><span>soil</span><span>plants</span><span>herb</span><span>pred</span></div>
+        </section>
+
+        <section class="card">
+          <h2>populations <em>log scale</em></h2>
+          <canvas class="chart" id="chPop" height="150"></canvas>
+        </section>
+
+        <section class="card">
+          <h2>phase portrait <em>prey &rarr; predator</em></h2>
+          <canvas class="chart" id="chPhase" height="170"></canvas>
+        </section>
+
+        <section class="card">
+          <h2>social structure <em>herding &amp; clans</em></h2>
+          <canvas class="chart" id="chSocial" height="140"></canvas>
+          <div class="tlegend">
+            <span><i style="background:#5fc7e8"></i>aggregation index (&lt;1 = herds)</span>
+            <span><i style="background:#c98adf"></i>distinct clans (0-20)</span>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>
+            trait evolution
+            <span class="seg mini" id="traitSpecies">
+              <button data-sp="herb" class="on">herbivores</button>
+              <button data-sp="pred">predators</button>
+            </span>
+          </h2>
+          <canvas class="chart" id="chTraits" height="150"></canvas>
+          <div class="tlegend" id="traitLegend"></div>
+        </section>
+
+        <section class="card">
+          <h2>environment</h2>
+          <label class="slider">
+            <span>radiation<em>mutation rate &amp; step</em></span>
+            <input type="range" id="sRad" min="0" max="8" step="0.1" value="1" />
+            <output id="oRad">1.0&times;</output>
+          </label>
+          <label class="slider">
+            <span>rainfall<em>plant growth &amp; seeding</em></span>
+            <input type="range" id="sDro" min="0" max="2" step="0.05" value="1" />
+            <output id="oDro">1.0&times;</output>
+          </label>
+          <label class="slider">
+            <span>temperature<em>metabolic cost</em></span>
+            <input type="range" id="sMet" min="0.4" max="2.5" step="0.05" value="1" />
+            <output id="oMet">1.0&times;</output>
+          </label>
+          <label class="slider">
+            <span>herd defence<em>deterrence per guard</em></span>
+            <input type="range" id="sDef" min="0" max="0.4" step="0.01" value="0.12" />
+            <output id="oDef">0.12</output>
+          </label>
+        </section>
+
+        <section class="card">
+          <h2>perturbations</h2>
+          <div class="btns">
+            <button data-act="cullH">kill 50% herbivores</button>
+            <button data-act="cullP">kill 50% predators</button>
+            <button data-act="fire">burn 70% of plants</button>
+            <button data-act="injP">+20 naive predators</button>
+            <button data-act="injH">+50 naive herbivores</button>
+            <button data-act="flare">radiation flare (30 s)</button>
+            <button data-act="disarm">disarm herds (30 s)</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>inspector</h2>
+          <div id="inspector" class="empty">no creature selected</div>
+          <canvas class="chart" id="chNet" height="180"></canvas>
+        </section>
+
+        <section class="card">
+          <h2>run</h2>
+          <div class="runrow">
+            <label>seed <input type="number" id="seed" value="20260903" /></label>
+            <button id="resetBtn">reset</button>
+            <button id="randBtn" class="ghost">random</button>
+          </div>
+          <div class="btns">
+            <button id="csvBtn">export time series (csv)</button>
+          </div>
+          <p class="note">
+            Closed energy budget, deterministic from the seed. Each creature carries an
+            18&rarr;8&rarr;3 network; nothing is trained — only born, eaten and out-reproduced.
+          </p>
+        </section>
+      </aside>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
